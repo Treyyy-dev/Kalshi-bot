@@ -378,7 +378,6 @@ def analyze_event(ev):
              safe(x_search, query, default=[]))
     lg = league_of(ev)
     teams = espn_teams(lg)
-    if ev.get("_game") and lg in LEAGUES and not teams:
 
     # Head-to-head games usually have 2 markets (one per team) -> log5 from records works
     team_info = {m.get("ticker"): find_team(m.get("yes_sub_title") or m.get("subtitle"), teams) for m in markets}
