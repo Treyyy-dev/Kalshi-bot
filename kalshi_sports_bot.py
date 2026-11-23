@@ -315,7 +315,11 @@ def espn_teams(league_key):
     teams = {}
     if league_key in LEAGUES:
         sport, lg, _ = LEAGUES[league_key]
-        st = safe(get, f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings", default={}) or {}
+        try:
+            st = get(f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings")
+        except Exception as e:
+            print(f"    [espn] standings {league_key} failed: {type(e).__name__} {e}")
+            st = {}
         _walk_standings(st, teams)
         extra = "?groups=50&limit=400" if "college" in lg else ""
         data = safe(get, f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{lg}/scoreboard{extra}",
@@ -375,7 +379,6 @@ def analyze_event(ev):
     lg = league_of(ev)
     teams = espn_teams(lg)
     if ev.get("_game") and lg in LEAGUES and not teams:
-        print(f"    [espn] no teams loaded for {lg}")
 
     # Head-to-head games usually have 2 markets (one per team) -> log5 from records works
     team_info = {m.get("ticker"): find_team(m.get("yes_sub_title") or m.get("subtitle"), teams) for m in markets}
