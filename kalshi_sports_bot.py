@@ -198,8 +198,14 @@ def fetch_sports_events(limit_events):
         ev["markets"] = [m for m in ev.get("markets", []) if liquid(m)]
     games = [e for e in games if e["markets"]]
     futures = sorted([e for e in futures if e["markets"]], key=ev_volume, reverse=True)
-    games.sort(key=lambda e: e.get("markets")[0].get("expected_expiration_time")
-               or e.get("markets")[0].get("close_time") or "")
+    major = ["NFL", "NBA", "NCAAF", "NHL", "MLB", "NCAAMB", "NCAAB", "WNBA", "EPL", "UCL", "MLS"]
+    games.sort(key=lambda e: (major.index(league_of(e)) if league_of(e) in major else len(major),
+                              e.get("markets")[0].get("expected_expiration_time")
+                              or e.get("markets")[0].get("close_time") or ""))
+    counts = {}
+    for e in games:
+        counts[league_of(e)] = counts.get(league_of(e), 0) + 1
+    print(f"  games by league: {counts}")
     n_fut = max(10, limit_events // 4)
     print(f"  found {len(games)} live games/fights and {len(futures)} liquid futures")
     return games[: limit_events] + futures[:n_fut]
@@ -351,6 +357,8 @@ def analyze_event(ev):
              safe(x_search, query, default=[]))
     lg = league_of(ev)
     teams = espn_teams(lg)
+    if ev.get("_game") and lg in LEAGUES and not teams:
+        print(f"    [espn] no teams loaded for {lg}")
 
     # Head-to-head games usually have 2 markets (one per team) -> log5 from records works
     team_info = {m.get("ticker"): find_team(m.get("yes_sub_title") or m.get("subtitle"), teams) for m in markets}
@@ -466,7 +474,11 @@ def scan(args):
     g = [r for r in rows if r["is_game"]]
     print(f"  {len(rows)} markets analyzed ({len(g)} game lines, {sum(1 for r in g if r['records'])} with records); "
           f"posts matched by source: {src or 'none'}")
-    for r in g[:6]:
+    shown = {}
+    for r in g:
+        if shown.get(r["league"], 0) >= 2 or len(shown) > 6:
+            continue
+        shown[r["league"]] = shown.get(r["league"], 0) + 1
         print(f"    {r['league']} {r['side']} | {r['event']} | kalshi {r['kalshi_pct']} est {r['est_pct']} "
               f"gap {r['edge_pts']:+} | rec {r['records'] or '-'} | posts {r['mentions']}")
     return rows
@@ -475,7 +487,7 @@ def scan(args):
 def main():
     ap = argparse.ArgumentParser(description="Kalshi sports intel bot (read-only)")
     ap.add_argument("--sport", help="nfl, nba, mlb, nhl, ncaaf, ncaab, wnba, soccer, ufc, golf, tennis...")
-    ap.add_argument("--max-events", type=int, default=60, help="max games to analyze (plus top futures)")
+    ap.add_argument("--max-events", type=int, default=150, help="max games to analyze (plus top futures)")
     ap.add_argument("--min-edge", type=float, default=0, help="only show gaps of at least N points")
     ap.add_argument("--watch", type=int, default=0, help="rescan every N seconds")
     ap.add_argument("--out", default="report.html")
