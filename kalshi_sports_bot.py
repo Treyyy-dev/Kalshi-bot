@@ -463,7 +463,12 @@ def scan(args):
     for r in rows:
         for h in r["headlines"]:
             src[h["src"]] = src.get(h["src"], 0) + 1
-    print(f"  {len(rows)} markets analyzed; posts matched by source: {src or 'none'}")
+    g = [r for r in rows if r["is_game"]]
+    print(f"  {len(rows)} markets analyzed ({len(g)} game lines, {sum(1 for r in g if r['records'])} with records); "
+          f"posts matched by source: {src or 'none'}")
+    for r in g[:6]:
+        print(f"    {r['league']} {r['side']} | {r['event']} | kalshi {r['kalshi_pct']} est {r['est_pct']} "
+              f"gap {r['edge_pts']:+} | rec {r['records'] or '-'} | posts {r['mentions']}")
     return rows
 
 
@@ -524,6 +529,8 @@ def serve(args):
         def do_GET(self):
             if self.path.startswith("/api"):
                 body, ctype = state["json"], "application/json"
+            elif self.path.startswith("/robots.txt"):
+                body, ctype = "User-agent: *\nAllow: /\n", "text/plain"
             elif self.path.startswith("/health"):
                 body, ctype = "ok", "text/plain"
             else:
