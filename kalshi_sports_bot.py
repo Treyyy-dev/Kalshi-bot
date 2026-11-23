@@ -458,21 +458,28 @@ def write_html(rows, path):
         f.write(page)
 
 
-def discord_alert(rows, min_edge, sent):
+def discord_alert(rows, min_edge, sent, max_per_scan=5):
+    """Posts the biggest positive gaps (bot estimate above the YES ask) on game lines, 1 hr cooldown each."""
     url = os.environ.get("DISCORD_WEBHOOK_URL")
     if not url:
         return
-    for r in rows:
-        key = (r["ticker"], round(r["edge_pts"]))
-        if abs(r["edge_pts"]) < min_edge or r["ticker"] in sent and time.time() - sent[r["ticker"]] < 3600:
-            continue
-        msg = (f"**{r['league']} | {r['side']}** ({r['event']})\nKalshi {r['kalshi_pct']}% -> est "
-               f"{r['est_pct']}%  (gap {r['edge_pts']:+} pts, conf {r['confidence']})\n"
-               f"Records {r['records'] or 'n/a'} | sentiment {r['sentiment']:+} from {r['mentions']} posts")
-        body = json.dumps({"content": msg}).encode()
-        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": UA})
-        safe(urllib.request.urlopen, req, timeout=10)
-        sent[r["ticker"]] = time.time()
+    picks = [r for r in rows if r["is_game"] and r["edge_pts"] >= min_edge and r["confidence"] != "low"
+             and time.time() - sent.get(r["ticker"], 0) > 3600]
+    picks.sort(key=lambda r: -r["edge_pts"])
+    ok = 0
+    for r in picks[:max_per_scan]:
+        msg = (f"**{r['league']} | {r['side']}** - {r['event']}\n"
+               f"Kalshi {r['kalshi_pct']}% (ask {r['yes_ask']:.0f}c) -> bot est {r['est_pct']}%  "
+               f"**gap {r['edge_pts']:+}** | conf {r['confidence']}\n"
+               f"News/social sentiment {r['sentiment']:+} from {r['mentions']} posts"
+               + (f" | records {r['records']}" if r["records"] else ""))
+        req = urllib.request.Request(url, data=json.dumps({"content": msg}).encode(),
+                                     headers={"Content-Type": "application/json", "User-Agent": UA})
+        if safe(urllib.request.urlopen, req, timeout=10) is not None:
+            ok += 1
+            sent[r["ticker"]] = time.time()
+        time.sleep(1)
+    print(f"  discord: {len(picks)} lines over +{min_edge} gap, {ok} alerts sent")
 
 
 def scan(args):
