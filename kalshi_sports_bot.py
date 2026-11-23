@@ -318,7 +318,7 @@ def espn_teams(league_key):
         try:
             st = get(f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings")
         except Exception as e:
-            print(f"    [espn] standings {league_key} failed: {type(e).__name__} {e}")
+            print(f"    [espn] standings {league_key} unavailable ({e}); records skipped for this league")
             st = {}
         _walk_standings(st, teams)
         extra = "?groups=50&limit=400" if "college" in lg else ""
@@ -330,8 +330,6 @@ def espn_teams(league_key):
                     rec = (c.get("records") or [{}])[0].get("summary", "")
                     _add_team(teams, c.get("team", {}), record_pct(rec), rec)
     _espn_cache[league_key] = teams
-    if league_key in LEAGUES:
-        print(f"    [espn] {league_key}: {len(teams)} team names loaded, e.g. {list(teams)[:4]}")
     return teams
 
 
@@ -381,8 +379,6 @@ def analyze_event(ev):
 
     # Head-to-head games usually have 2 markets (one per team) -> log5 from records works
     team_info = {m.get("ticker"): find_team(m.get("yes_sub_title") or m.get("subtitle"), teams) for m in markets}
-    if ev.get("_game") and teams and not any(team_info.values()) and lg in ("NBA", "NFL", "NHL"):
-        print(f"    [espn-miss] {lg} {[m.get('yes_sub_title') for m in markets]} n={len(markets)}")
 
     rows = []
     for m in markets:

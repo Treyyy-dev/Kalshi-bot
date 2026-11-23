@@ -30,3 +30,6 @@ sentiment nudges it up to ±6 points. "Gap" = estimate minus the YES ask. Read-o
 ## Render
 Web service · runtime Python · build `pip install -r requirements.txt` ·
 start `python kalshi_sports_bot.py --serve --watch 900` · open the service URL for the live report (`/api` = JSON).
+
+**Note:** ESPN and Reddit block requests from cloud servers like Render, so on Render the bot uses
+Kalshi + Google News + Bluesky. Run it on your own phone/computer to also get ESPN records and Reddit.
