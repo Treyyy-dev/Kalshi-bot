@@ -614,11 +614,25 @@ main{padding:12px;display:grid;gap:10px;max-width:900px;margin:auto}
 .h{font-size:12px;padding:4px 0;border-top:1px solid var(--line)}.h a{color:var(--txt);text-decoration:none}
 .tag{font-size:10px;padding:1px 5px;border-radius:4px;background:#21262d;margin-right:4px}
 footer{padding:20px;text-align:center}
+.help{background:#21262d;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 12px;font-weight:600}
+.q{display:inline-block;width:16px;height:16px;line-height:16px;border-radius:50%;background:#30363d;color:var(--txt);font-size:11px;text-align:center;cursor:pointer;margin-left:3px;border:0;padding:0}
+.verdict{margin-top:8px;padding:8px 10px;border-radius:8px;font-size:13px;background:#0d1117}
+.v-good{border-left:4px solid var(--g)}.v-lean{border-left:4px solid #d29922}.v-even{border-left:4px solid var(--mut)}.v-bad{border-left:4px solid var(--r)}
+#tut{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:10;padding:16px}
+#tut.on{display:flex}.tbox{background:var(--card);border:1px solid var(--line);border-radius:14px;max-width:480px;width:100%;padding:20px}
+.tbox h2{margin:0 0 4px;font-size:18px}.tbox p,.tbox li{line-height:1.5;color:#c9d1d9}.tbox ul{padding-left:18px}
+.ex{background:#0d1117;border-radius:8px;padding:10px;margin:10px 0;font-size:13px}
+.dots{display:flex;gap:6px;justify-content:center;margin:14px 0}.dots i{width:8px;height:8px;border-radius:50%;background:#30363d}.dots i.on{background:var(--b)}
+.tnav{display:flex;justify-content:space-between;gap:8px}.tnav button{flex:1;padding:10px;border-radius:8px;border:1px solid var(--line);background:#21262d;color:var(--txt);font-weight:600}
+.tnav .pri{background:var(--b);color:#0d1117;border:0}
 </style></head><body>
 <header><h1>Kalshi Sports Intel</h1><div class="mut">Updated __STAMP__ · estimates blend Kalshi price, team records, news & social sentiment · not financial advice</div>
 <div class="bar"><input id="q" placeholder="Search team / event"><select id="lg"><option value="">All leagues</option></select>
+<button class="help" onclick="tut(0)">📘 How to read this</button>
 <select id="sort"><option value="gap">Biggest gap</option><option value="est">Highest est %</option><option value="vol">Most volume</option><option value="buzz">Most buzz</option></select></div></header>
 <main id="list"></main>
+<div id="tut" onclick="if(event.target===this)closeTut()"><div class="tbox"><div id="tbody"></div>
+<div class="dots" id="tdots"></div><div class="tnav"><button id="tprev" onclick="step(-1)">Back</button><button class="pri" id="tnext" onclick="step(1)">Next</button></div></div></div>
 <footer class="mut">White line = Kalshi implied %. Blue bar = bot estimate. Gap = estimate minus YES ask.</footer>
 <script>
 const D=__DATA__;const $=s=>document.querySelector(s);
@@ -629,14 +643,42 @@ let r=D.filter(x=>(!lg||x.league==lg)&&(!q||(x.side+' '+x.event).toLowerCase().i
 const k={gap:x=>-Math.abs(x.edge_pts),est:x=>-x.est_pct,vol:x=>-x.volume,buzz:x=>-x.mentions}[so];r.sort((a,b)=>k(a)-k(b));
 $('#list').innerHTML=r.slice(0,300).map(x=>`<div class="c"><div class="top"><div><div class="side">${esc(x.side)}</div>
 <div class="mut">${esc(x.event)}</div></div><span class="lg">${esc(x.league)}</span></div>
-<div class="nums"><div class="n"><span class="mut">Kalshi</span><b>${x.kalshi_pct}%</b></div>
-<div class="n"><span class="mut">Bot est.</span><b>${x.est_pct}%</b></div>
-<div class="n"><span class="mut">Gap</span><b class="${x.edge_pts>=0?'pos':'neg'}">${x.edge_pts>0?'+':''}${x.edge_pts}</b></div></div>
+<div class="nums"><div class="n"><span class="mut">Kalshi<button class="q" onclick="tut(1)">?</button></span><b>${x.kalshi_pct}%</b></div>
+<div class="n"><span class="mut">Bot est.<button class="q" onclick="tut(2)">?</button></span><b>${x.est_pct}%</b></div>
+<div class="n"><span class="mut">Gap<button class="q" onclick="tut(3)">?</button></span><b class="${x.edge_pts>=0?'pos':'neg'}">${x.edge_pts>0?'+':''}${x.edge_pts}</b></div></div>
 <div class="meter"><i style="width:${x.est_pct}%"></i><s style="left:${x.kalshi_pct}%"></s></div>
-<div class="mut" style="margin-top:8px">Records: ${x.records?esc(x.records)+' ('+x.record_pct+'%)':'n/a'} · Sentiment <span class="${x.sentiment>=0?'pos':'neg'}">${x.sentiment}</span> from ${x.mentions} posts · Conf ${x.confidence} · Vol ${x.volume}</div>
+${verdict(x)}
+<div class="mut" style="margin-top:8px">Records: ${x.records?esc(x.records)+' ('+x.record_pct+'%)':'n/a'} · Sentiment <span class="${x.sentiment>=0?'pos':'neg'}">${x.sentiment}</span> from ${x.mentions} posts · Conf ${x.confidence}<button class="q" onclick="tut(4)">?</button> · Vol ${x.volume}</div>
 ${x.headlines.length?`<details><summary>What people are saying (${x.headlines.length})</summary>${x.headlines.map(h=>`<div class="h"><span class="tag">${h.src}</span><a href="${esc(h.link)}" target="_blank" rel="noopener">${esc(h.title)}</a> <span class="${h.s>=0?'pos':'neg'}">${h.s}</span></div>`).join('')}</details>`:''}
 </div>`).join('')||'<p class="mut">No markets match.</p>';}
-['#q','#lg','#sort'].forEach(s=>$(s).addEventListener('input',draw));draw();
+['#q','#lg','#sort'].forEach(s=>$(s).addEventListener('input',draw));
+function verdict(x){const g=x.edge_pts,ask=x.yes_ask!=null?Math.round(x.yes_ask):Math.round(x.kalshi_pct);
+const t=esc(x.side);let c,m;
+if(g>=5&&x.confidence!=='low'){c='v-good';m=`🟢 <b>Worth a closer look.</b> YES costs ${ask}¢ but the bot thinks ${t} has about a ${x.est_pct}% chance — that's ${g} points better than the price.`}
+else if(g>=2){c='v-lean';m=`🟡 <b>Slight lean.</b> The bot is a little more positive than the price (${g>0?'+':''}${g}), but it's small — could just be noise.`}
+else if(g>-4){c='v-even';m=`⚪ <b>No edge.</b> The bot basically agrees with the market. YES at ${ask}¢ is about fair.`}
+else{c='v-bad';m=`🔴 <b>YES looks pricey.</b> You'd pay ${ask}¢ but the bot only sees ${x.est_pct}%. Usually this is just the bid/ask spread, not a reason to bet NO.`}
+if(x.confidence==='low')m+=` <span class="mut">(Low confidence — little news found.)</span>`;
+return `<div class="verdict ${c}">${m}</div>`}
+
+const T=[
+['👋 Welcome','<p>This page scans every sports market on <b>Kalshi</b> and compares Kalshi\'s price to the bot\'s own estimate built from news and social media.</p><p>On Kalshi you buy <b>YES</b> or <b>NO</b> on an outcome, like "Dallas wins." A contract pays <b>$1</b> if you\'re right and <b>$0</b> if you\'re wrong.</p><p>This takes about a minute. Tap Next.</p>'],
+['📊 Kalshi %','<p>This is what the <b>market</b> thinks. It comes straight from the price.</p><div class="ex">YES costs <b>60¢</b> → market says about a <b>60%</b> chance.<br>YES costs <b>21¢</b> → about a <b>21%</b> chance (roughly 1 in 5).</div><p>Thousands of traders set this price, so it\'s usually pretty accurate.</p>'],
+['🤖 Bot est. %','<p>This is the <b>bot\'s guess</b>. It starts from Kalshi\'s number, then nudges it:</p><ul><li>Good news (player returns, win streak, "healthy") → <b>up</b></li><li>Bad news (injury, "ruled out", suspension) → <b>down</b></li></ul><p>It can move at most about <b>6 points</b>, because the market is usually right and headlines can be misleading.</p><p>The blue bar is the bot\'s %, the white line is Kalshi\'s %.</p>'],
+['➕ Gap','<p><b>Gap = Bot % − the price you\'d pay for YES.</b></p><div class="ex"><b>+6</b> → bot thinks it\'s worth more than it costs (possible value)<br><b>0 to +2</b> → about fair<br><b>negative</b> → YES costs more than the bot thinks it\'s worth</div><p>Small gaps (under ~3) are just noise. Look for <b>+5 or more</b>.</p><p>Why are most gaps a bit negative? Because you buy at the <b>ask</b> price, which is slightly above the middle price. That small cost is called the <b>spread</b>.</p>'],
+['🎯 Confidence & posts','<p><b>Posts</b> = how many news headlines and social posts mentioned this team. More posts = more to go on.</p><ul><li><b>High</b> – lots of coverage</li><li><b>Med</b> – some coverage</li><li><b>Low</b> – barely any news, so the bot is mostly just copying Kalshi</li></ul><p><b>Sentiment</b> runs from −1 (very negative news) to +1 (very positive). Tap "What people are saying" on a card to read the actual headlines yourself.</p>'],
+['🧪 Example','<div class="ex"><b>Kalshi 21%</b> · <b>Bot 20.1%</b> · YES costs 22¢<br>Gap = 20.1 − 22 = <b>−1.9</b></div><p>⚪ <b>No edge.</b> The bot agrees with the market. Buying NO doesn\'t help either: it costs ~79¢ and the bot gives the team about an 80% chance of losing.</p><div class="ex"><b>Kalshi 40%</b> · <b>Bot 47%</b> · YES costs 41¢<br>Gap = 47 − 41 = <b>+6</b></div><p>🟢 <b>Worth a closer look.</b> Read the headlines and check whether the good news is real and recent.</p>'],
+['⚠️ Before you bet','<ul><li>A big gap means <b>"look closer"</b>, not "sure win."</li><li>The bot only knows whether headlines <i>sound</i> good or bad. It can misread a story, and the news may already be in the price.</li><li>Check injury reports and lineups yourself, especially close to game time.</li><li>Only use money you\'re OK losing, and keep bets small while you learn.</li></ul><p>Tap the <b>?</b> buttons on any card to jump back to a lesson.</p>']];
+let ti=0;
+function tut(i){ti=i;renderTut();$('#tut').classList.add('on')}
+function closeTut(){$('#tut').classList.remove('on');try{localStorage.setItem('tutSeen','1')}catch(e){}}
+function step(d){if(ti+d>=T.length)return closeTut();ti=Math.max(0,ti+d);renderTut()}
+function renderTut(){$('#tbody').innerHTML=`<h2>${T[ti][0]}</h2>${T[ti][1]}`;
+$('#tdots').innerHTML=T.map((_,i)=>`<i class="${i===ti?'on':''}"></i>`).join('');
+$('#tprev').style.visibility=ti?'visible':'hidden';$('#tnext').textContent=ti===T.length-1?'Got it':'Next'}
+let seen=false;try{seen=localStorage.getItem('tutSeen')}catch(e){}
+if(!seen)tut(0);
+draw();
 </script></body></html>"""
 
 if __name__ == "__main__":
