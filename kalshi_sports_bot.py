@@ -218,7 +218,7 @@ def league_of(ev):
             return frag
     title = (ev.get("title") or "").lower()
     for w in EXTRA_SPORT_WORDS:
-        if w in title or w.upper() in st:
+        if re.search(rf"\b{w}\b", title) or st.startswith(f"KX{w.upper()}"):
             return w.upper()
     return "OTHER"
 
@@ -290,26 +290,41 @@ def x_search(query, max_items=25):
 _espn_cache = {}
 
 
+def _add_team(teams, t, pct, rec):
+    names = {t.get(k, "").lower() for k in
+             ("displayName", "shortDisplayName", "name", "location", "abbreviation", "nickname") if t.get(k)}
+    for n in names:
+        teams.setdefault(n, {"pct": pct, "record": rec, "name": t.get("displayName", "")})
+
+
+def _walk_standings(node, teams):
+    for e in (node.get("standings") or {}).get("entries", []) or []:
+        st = {x.get("name"): x.get("value") for x in e.get("stats", [])}
+        w, l, t = num(st.get("wins")), num(st.get("losses")), num(st.get("ties")) + num(st.get("otLosses"))
+        if w + l + t:
+            rec = f"{int(w)}-{int(l)}" + (f"-{int(t)}" if t else "")
+            _add_team(teams, e.get("team", {}), (w + 0.5 * t) / (w + l + t), rec)
+    for c in node.get("children", []) or []:
+        _walk_standings(c, teams)
+
+
 def espn_teams(league_key):
-    """team-name -> win pct from ESPN scoreboard (current slate)."""
+    """team-name -> season win pct, from ESPN standings (all teams) + scoreboard (fills gaps)."""
     if league_key in _espn_cache:
         return _espn_cache[league_key]
     teams = {}
     if league_key in LEAGUES:
         sport, lg, _ = LEAGUES[league_key]
-        extra = "&groups=50&limit=400" if "college" in lg else ""
-        data = safe(get, f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{lg}/scoreboard?{extra}",
+        st = safe(get, f"https://site.api.espn.com/apis/v2/sports/{sport}/{lg}/standings", default={}) or {}
+        _walk_standings(st, teams)
+        extra = "?groups=50&limit=400" if "college" in lg else ""
+        data = safe(get, f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{lg}/scoreboard{extra}",
                     default={}) or {}
         for e in data.get("events", []):
             for comp in e.get("competitions", []):
                 for c in comp.get("competitors", []):
                     rec = (c.get("records") or [{}])[0].get("summary", "")
-                    pct = record_pct(rec)
-                    t = c.get("team", {})
-                    names = {t.get(k, "").lower() for k in
-                             ("displayName", "shortDisplayName", "name", "location", "abbreviation") if t.get(k)}
-                    for n in names:
-                        teams[n] = {"pct": pct, "record": rec, "name": t.get("displayName", "")}
+                    _add_team(teams, c.get("team", {}), record_pct(rec), rec)
     _espn_cache[league_key] = teams
     return teams
 
