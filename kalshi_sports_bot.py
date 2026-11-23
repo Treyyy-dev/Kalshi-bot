@@ -135,21 +135,74 @@ def market_prob(m):
     return last if last else (ask or bid)
 
 
-def fetch_sports_events(limit_events):
-    """Pages through open Kalshi events and keeps the Sports category."""
-    events, cursor = [], ""
-    for _ in range(40):  # hard page cap
-        q = {"status": "open", "with_nested_markets": "true", "limit": 200}
+GAME_SERIES_FALLBACK = [
+    "KXNFLGAME", "KXNCAAFGAME", "KXNBAGAME", "KXWNBAGAME", "KXNCAAMBGAME", "KXNCAAWBGAME",
+    "KXMLBGAME", "KXNHLGAME", "KXEPLGAME", "KXUCLGAME", "KXLALIGAGAME", "KXSERIEAGAME",
+    "KXBUNDESLIGAGAME", "KXLIGUE1GAME", "KXMLSGAME", "KXUFCFIGHT", "KXATPMATCH", "KXWTAMATCH",
+]
+GAME_HINTS = ("GAME", "FIGHT", "MATCH", "BOUT")
+
+
+def events_for(params, pages=10):
+    out, cursor = [], ""
+    for _ in range(pages):
+        q = {"status": "open", "with_nested_markets": "true", "limit": 200, **params}
         if cursor:
             q["cursor"] = cursor
         data = get(f"{KALSHI}/events?{urllib.parse.urlencode(q)}")
-        for ev in data.get("events", []):
-            if (ev.get("category") or "").lower() == "sports":
-                events.append(ev)
+        out.extend(data.get("events", []))
         cursor = data.get("cursor")
-        if not cursor or len(events) >= limit_events * 3:
+        if not cursor:
             break
-    return events
+    return out
+
+
+def liquid(m):
+    bid, ask = price_cents(m, "yes_bid"), price_cents(m, "yes_ask")
+    if bid and ask and 0 < bid <= ask < 100:
+        return ask - bid <= 25
+    return bool(price_cents(m, "last_price")) and num(m.get("volume") or m.get("volume_fp")) > 0
+
+
+def num(v):
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def ev_volume(ev):
+    return sum(num(m.get("volume") or m.get("volume_fp")) for m in ev.get("markets", []))
+
+
+def fetch_sports_events(limit_events):
+    """Games first (every open game/fight/match series), then the most-traded sports futures."""
+    series = safe(get, f"{KALSHI}/series?category=Sports", default={}) or {}
+    game_series = {s.get("ticker", "") for s in series.get("series", []) or []
+                   if any(h in (s.get("ticker") or "").upper() for h in GAME_HINTS)}
+    game_series |= set(GAME_SERIES_FALLBACK)
+
+    games, seen = [], set()
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for evs in pool.map(lambda t: safe(events_for, {"series_ticker": t}, 3, default=[]), sorted(game_series)):
+            for ev in evs or []:
+                ev["_game"] = True
+                ev.setdefault("category", "Sports")
+                if ev.get("event_ticker") not in seen:
+                    seen.add(ev.get("event_ticker"))
+                    games.append(ev)
+    futures = [e for e in safe(events_for, {}, 40, default=[]) or []
+               if (e.get("category") or "").lower() == "sports" and e.get("event_ticker") not in seen]
+
+    for ev in games + futures:
+        ev["markets"] = [m for m in ev.get("markets", []) if liquid(m)]
+    games = [e for e in games if e["markets"]]
+    futures = sorted([e for e in futures if e["markets"]], key=ev_volume, reverse=True)
+    games.sort(key=lambda e: e.get("markets")[0].get("expected_expiration_time")
+               or e.get("markets")[0].get("close_time") or "")
+    n_fut = max(10, limit_events // 4)
+    print(f"  found {len(games)} live games/fights and {len(futures)} liquid futures")
+    return games[: limit_events] + futures[:n_fut]
 
 
 def league_of(ev):
@@ -199,6 +252,17 @@ def reddit(query, max_items=20):
                     "date": datetime.fromtimestamp(d.get("created_utc", 0), timezone.utc).isoformat(),
                     "weight": 1 + min(3, (d.get("score", 0) or 0) / 200)})
     return out
+
+
+def bluesky(query, max_items=25):
+    url = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts?" + urllib.parse.urlencode(
+        {"q": query, "limit": max_items, "sort": "latest"})
+    data = get(url)
+    return [{"src": "bluesky", "title": p.get("record", {}).get("text", ""),
+             "date": p.get("record", {}).get("createdAt", ""),
+             "link": "https://bsky.app/profile/%s/post/%s" % (p.get("author", {}).get("handle", ""),
+                                                             p.get("uri", "").rsplit("/", 1)[-1]),
+             "weight": 1 + min(3, (p.get("likeCount", 0) or 0) / 100)} for p in data.get("posts", [])]
 
 
 def x_search(query, max_items=25):
@@ -283,7 +347,7 @@ def analyze_event(ev):
     query = re.sub(r"\b(will|win|the|game|match|winner|\?)\b", " ", title, flags=re.I)
     query = re.sub(r"\s+", " ", query).strip() or title
 
-    posts = (safe(google_news, query, default=[]) + safe(reddit, query, default=[]) +
+    posts = (safe(google_news, query, default=[]) + safe(reddit, query, default=[]) + safe(bluesky, query, default=[]) +
              safe(x_search, query, default=[]))
     lg = league_of(ev)
     teams = espn_teams(lg)
@@ -302,6 +366,8 @@ def analyze_event(ev):
         # sentiment for this side minus the opponent's sentiment
         own = [p for p in posts if mentions(p["title"], side)]
         own_s = wavg([(sentiment(p["title"]), p.get("weight", 1)) for p in own])
+        if not own and len(markets) != 2:
+            own, own_s = posts, 0.0  # prop/futures line: show the buzz, don't guess a direction
         others = [p for p in posts if not mentions(p["title"], side)]
         opp_s = wavg([(sentiment(p["title"]), p.get("weight", 1)) for p in others]) if len(markets) == 2 else 0
         net_sent = own_s - opp_s
@@ -328,11 +394,11 @@ def analyze_event(ev):
         conf = "high" if (rec_p is not None and len(own) >= 6) else "med" if (rec_p is not None or len(own) >= 3) else "low"
 
         rows.append({
-            "league": lg, "event": title, "side": side, "ticker": m.get("ticker"),
+            "league": lg, "event": title, "is_game": bool(ev.get("_game")), "side": side, "ticker": m.get("ticker"),
             "kalshi_pct": round(mp * 100, 1), "est_pct": round(est * 100, 1),
             "edge_pts": round(edge, 1), "yes_ask": ask, "yes_bid": price_cents(m, "yes_bid"),
-            "volume": m.get("volume") or m.get("volume_fp") or 0,
-            "open_interest": m.get("open_interest") or m.get("open_interest_fp") or 0,
+            "volume": num(m.get("volume") or m.get("volume_fp")),
+            "open_interest": num(m.get("open_interest") or m.get("open_interest_fp")),
             "record_pct": round(rec_p * 100, 1) if rec_p is not None else None, "records": rec_txt,
             "sentiment": round(net_sent, 2), "mentions": len(own), "confidence": conf,
             "close": m.get("close_time") or m.get("expected_expiration_time") or "",
@@ -387,26 +453,31 @@ def discord_alert(rows, min_edge, sent):
 def scan(args):
     print(f"[{datetime.now():%H:%M:%S}] Pulling open Kalshi sports markets...")
     events = [e for e in fetch_sports_events(args.max_events) if sport_matches(e, args.sport)]
-    events = events[: args.max_events]
     print(f"  {len(events)} sports events. Gathering news / social / records (this takes a minute)...")
     rows = []
     with ThreadPoolExecutor(max_workers=6) as pool:
         for res in pool.map(lambda e: safe(analyze_event, e, default=[]), events):
             rows.extend(res or [])
-    rows.sort(key=lambda r: -abs(r["edge_pts"]))
+    rows.sort(key=lambda r: (not r["is_game"], -abs(r["edge_pts"])))
+    src = {}
+    for r in rows:
+        for h in r["headlines"]:
+            src[h["src"]] = src.get(h["src"], 0) + 1
+    print(f"  {len(rows)} markets analyzed; posts matched by source: {src or 'none'}")
     return rows
 
 
 def main():
     ap = argparse.ArgumentParser(description="Kalshi sports intel bot (read-only)")
     ap.add_argument("--sport", help="nfl, nba, mlb, nhl, ncaaf, ncaab, wnba, soccer, ufc, golf, tennis...")
-    ap.add_argument("--max-events", type=int, default=40)
+    ap.add_argument("--max-events", type=int, default=60, help="max games to analyze (plus top futures)")
     ap.add_argument("--min-edge", type=float, default=0, help="only show gaps of at least N points")
     ap.add_argument("--watch", type=int, default=0, help="rescan every N seconds")
     ap.add_argument("--out", default="report.html")
     ap.add_argument("--serve", action="store_true",
                     help="web mode (Render): rescan every --watch seconds and serve the report on $PORT")
     args = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)
 
     if args.serve:
         return serve(args)
